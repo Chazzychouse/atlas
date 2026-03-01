@@ -29,6 +29,10 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+func init() {
+	rootCmd.AddCommand(setupCmd)
+}
+
 func runTUI(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
