@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/chazzychouse/atlas/main/install.sh 
 ### Quick install (Windows PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/chazzychouse/atlas/main/install.sh | iex
+irm https://raw.githubusercontent.com/chazzychouse/atlas/main/install.ps1 | iex
 ```
 
 ### From source
