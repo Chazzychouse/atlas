@@ -84,9 +84,17 @@ func (c *IMAPClient) ListFolders() ([]Folder, error) {
 
 	var folders []Folder
 	for _, mb := range mailboxes {
+		// Skip non-selectable namespace folders (e.g. [Gmail])
+		noselect := false
 		var attrs []string
 		for _, a := range mb.Attrs {
 			attrs = append(attrs, string(a))
+			if a == imap.MailboxAttrNoSelect {
+				noselect = true
+			}
+		}
+		if noselect {
+			continue
 		}
 		folders = append(folders, Folder{
 			Name:       mb.Mailbox,

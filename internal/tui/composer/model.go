@@ -133,11 +133,15 @@ func (m *Model) Update(msg tea.Msg) (tui.View, tea.Cmd) {
 	case tui.MessageSentMsg:
 		m.sending = false
 		if msg.Err != nil {
-			return m, func() tea.Msg {
-				return tui.StatusMsg{Text: "Send failed: " + msg.Err.Error(), IsError: true}
-			}
+			return m, tea.Batch(
+				func() tea.Msg { return tui.SpinnerStopMsg{} },
+				func() tea.Msg {
+					return tui.StatusMsg{Text: "Send failed: " + msg.Err.Error(), IsError: true}
+				},
+			)
 		}
 		return m, tea.Batch(
+			func() tea.Msg { return tui.SpinnerStopMsg{} },
 			func() tea.Msg { return tui.StatusMsg{Text: "Message sent!"} },
 			func() tea.Msg { return tui.PopViewMsg{} },
 		)
@@ -149,25 +153,18 @@ func (m *Model) Update(msg tea.Msg) (tui.View, tea.Cmd) {
 func (m *Model) View() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4"))
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	padStyle := lipgloss.NewStyle().PaddingLeft(2)
 
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render("  Compose"))
 	sb.WriteString("\n\n")
 
-	for i, input := range m.inputs {
-		if i == m.focus {
-			sb.WriteString("  " + input.View() + "\n")
-		} else {
-			sb.WriteString("  " + input.View() + "\n")
-		}
+	for _, input := range m.inputs {
+		sb.WriteString("  " + input.View() + "\n")
 	}
 
 	sb.WriteString("\n")
-	if m.focus == fieldBody {
-		sb.WriteString("  " + m.body.View())
-	} else {
-		sb.WriteString("  " + m.body.View())
-	}
+	sb.WriteString(padStyle.Render(m.body.View()))
 
 	sb.WriteString("\n\n")
 	sb.WriteString(labelStyle.Render("  Ctrl+S: send | Tab: next field | Esc: cancel"))
@@ -193,11 +190,28 @@ func (m *Model) send() tea.Cmd {
 		}
 	}
 
+	// Validate all email addresses
+	for _, addr := range to {
+		if !mail.ValidateEmail(addr) {
+			return func() tea.Msg {
+				return tui.StatusMsg{Text: fmt.Sprintf("Invalid To address: %s", addr), IsError: true}
+			}
+		}
+	}
+	cc := parseAddresses(m.inputs[fieldCc].Value())
+	for _, addr := range cc {
+		if !mail.ValidateEmail(addr) {
+			return func() tea.Msg {
+				return tui.StatusMsg{Text: fmt.Sprintf("Invalid Cc address: %s", addr), IsError: true}
+			}
+		}
+	}
+
 	m.sending = true
 	sendMsg := &mail.SendMessage{
 		From:    mail.FormatAddress(m.cfg.FromName, m.cfg.FromEmail),
 		To:      to,
-		Cc:      parseAddresses(m.inputs[fieldCc].Value()),
+		Cc:      cc,
 		Subject: m.inputs[fieldSubject].Value(),
 		Body:    m.body.Value(),
 	}

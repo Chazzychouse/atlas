@@ -1,6 +1,21 @@
 package mail
 
-import "time"
+import (
+	"net/mail"
+	"strings"
+	"time"
+)
+
+// ValidateEmail checks if s is a valid email address.
+// It accepts both bare addresses and "Name <addr>" format.
+func ValidateEmail(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	_, err := mail.ParseAddress(s)
+	return err == nil
+}
 
 // Envelope represents the summary of an email message.
 type Envelope struct {

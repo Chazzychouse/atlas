@@ -18,11 +18,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Version is set at build time via -ldflags.
+var Version = "dev"
+
 var rootCmd = &cobra.Command{
-	Use:   "atlas",
-	Short: "A TUI email client",
-	Long:  "Atlas is a terminal-based email client with native IMAP and SMTP support.",
-	RunE:  runTUI,
+	Use:     "atlas",
+	Short:   "A TUI email client",
+	Long:    "Atlas is a terminal-based email client with native IMAP and SMTP support.",
+	Version: Version,
+	RunE:    runTUI,
 }
 
 func Execute() error {

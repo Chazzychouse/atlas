@@ -225,6 +225,17 @@ func (m *Model) cancelInput() {
 
 func (m *Model) View() string {
 	if m.mode == modeNormal {
+		if len(m.folders) == 0 {
+			emptyStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#888888")).
+				Padding(1, 1)
+			titleStyle := lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#7D56F4")).
+				Padding(0, 1)
+			return titleStyle.Render("Folders") + "\n" +
+				emptyStyle.Render("No folders\n\nPress 'n' to create one.")
+		}
 		return m.list.View()
 	}
 

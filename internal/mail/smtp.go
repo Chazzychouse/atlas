@@ -57,12 +57,12 @@ func (s *SMTPClient) Send(msg *SendMessage) error {
 		return fmt.Errorf("SMTP auth: %w", err)
 	}
 
-	// Set sender
+	// Set sender — MAIL FROM requires a bare email address
 	from := msg.From
 	if from == "" {
 		from = s.cfg.FromEmail
 	}
-	if err := c.Mail(from); err != nil {
+	if err := c.Mail(extractEmail(from)); err != nil {
 		return fmt.Errorf("SMTP MAIL FROM: %w", err)
 	}
 

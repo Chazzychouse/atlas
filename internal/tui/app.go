@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/chazzychouse/atlas/internal/config"
 	"github.com/chazzychouse/atlas/internal/mail"
@@ -16,21 +17,22 @@ type ViewFactory func(id ViewID, data PushViewMsg) View
 
 // App is the root Bubble Tea model.
 type App struct {
-	cfg        *config.Config
-	imap       *mail.IMAPClient
-	smtp       *mail.SMTPClient
-	nav        *NavStack
-	statusbar  statusbar.Model
-	keys       GlobalKeyMap
-	factory    ViewFactory
-	width      int
-	height     int
+	cfg           *config.Config
+	imap          *mail.IMAPClient
+	smtp          *mail.SMTPClient
+	nav           *NavStack
+	statusbar     statusbar.Model
+	keys          GlobalKeyMap
+	factory       ViewFactory
+	width         int
+	height        int
 	showFolder    bool
 	folderFocused bool
 	folderView    View
-	helpView   View
-	showHelp   bool
-	ready      bool
+	helpView      View
+	showHelp      bool
+	ready         bool
+	statusGen     uint64 // incremented each time a status is set; used to expire auto-clears
 }
 
 // NewApp creates the root application model.
@@ -147,9 +149,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case key.Matches(msg, a.keys.FolderList):
 			a.showFolder = !a.showFolder
-			if a.showFolder && a.folderView == nil && a.factory != nil {
-				a.folderView = a.factory(ViewFolderList, PushViewMsg{})
-				cmds = append(cmds, a.folderView.Init())
+			if a.showFolder {
+				a.folderFocused = true
+				if a.folderView == nil && a.factory != nil {
+					a.folderView = a.factory(ViewFolderList, PushViewMsg{})
+					cmds = append(cmds, a.folderView.Init())
+				}
+			} else {
+				a.folderFocused = false
 			}
 			return a, tea.Batch(cmds...)
 		case key.Matches(msg, a.keys.Back):
@@ -195,6 +202,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case FolderSelectedMsg:
 		a.showFolder = false
+		a.folderFocused = false
 		// Push new envelope list for selected folder
 		if a.factory != nil {
 			view := a.factory(ViewEnvelopeList, PushViewMsg{Folder: msg.Folder})
@@ -204,6 +212,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StatusMsg:
 		a.statusbar.SetStatus(msg.Text, msg.IsError)
+		a.statusGen++
+		if msg.Text != "" && !msg.IsError {
+			gen := a.statusGen
+			cmds = append(cmds, func() tea.Msg {
+				time.Sleep(4 * time.Second)
+				return StatusClearMsg{Gen: gen}
+			})
+		}
+
+	case StatusClearMsg:
+		if msg.Gen == a.statusGen {
+			a.statusbar.SetStatus("", false)
+		}
 
 	case SpinnerStartMsg:
 		cmds = append(cmds, a.statusbar.StartSpinner())
@@ -220,6 +241,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v := a.nav.Current(); v != nil {
 			updated, cmd := v.Update(msg)
 			a.nav.Replace(updated)
+			cmds = append(cmds, cmd)
+		}
+
+		// Pass to folder view (for async results like FolderCreatedMsg, etc.)
+		if a.folderView != nil {
+			updated, cmd := a.folderView.Update(msg)
+			a.folderView = updated
 			cmds = append(cmds, cmd)
 		}
 

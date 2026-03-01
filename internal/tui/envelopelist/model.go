@@ -270,6 +270,12 @@ func (m *Model) View() string {
 	if m.loading && len(m.envelopes) == 0 {
 		return "\n  Loading..."
 	}
+	if !m.loading && len(m.envelopes) == 0 {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888")).
+			Padding(2, 4)
+		return emptyStyle.Render("No messages in " + m.folder + "\n\nPress 'c' to compose a new message.")
+	}
 	return m.table.View()
 }
 

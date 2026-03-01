@@ -94,6 +94,9 @@ type StatusMsg struct {
 type SpinnerStartMsg struct{}
 type SpinnerStopMsg struct{}
 
+// StatusClearMsg clears the status bar if the generation matches.
+type StatusClearMsg struct{ Gen uint64 }
+
 // FolderCreatedMsg indicates a folder was created.
 type FolderCreatedMsg struct {
 	Name string
