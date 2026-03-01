@@ -25,8 +25,9 @@ type App struct {
 	factory    ViewFactory
 	width      int
 	height     int
-	showFolder bool
-	folderView View
+	showFolder    bool
+	folderFocused bool
+	folderView    View
 	helpView   View
 	showHelp   bool
 	ready      bool
@@ -156,23 +157,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.showHelp = false
 				return a, nil
 			}
+			if a.folderFocused {
+				a.folderFocused = false
+				return a, nil
+			}
 			if a.nav.Len() > 1 {
 				a.nav.Pop()
 				return a, nil
 			}
+		case msg.String() == "tab" && a.showFolder:
+			a.folderFocused = !a.folderFocused
+			return a, nil
 		}
 
-		// Pass to current view
-		if v := a.nav.Current(); v != nil {
-			updated, cmd := v.Update(msg)
-			a.nav.Replace(updated)
-			cmds = append(cmds, cmd)
-		}
-
-		// Pass to folder view if visible
-		if a.showFolder && a.folderView != nil {
+		// Route keys to focused panel only
+		if a.folderFocused && a.showFolder && a.folderView != nil {
 			updated, cmd := a.folderView.Update(msg)
 			a.folderView = updated
+			cmds = append(cmds, cmd)
+		} else if v := a.nav.Current(); v != nil {
+			updated, cmd := v.Update(msg)
+			a.nav.Replace(updated)
 			cmds = append(cmds, cmd)
 		}
 
@@ -242,10 +247,17 @@ func (a *App) View() string {
 
 	var body string
 	if a.showFolder && a.folderView != nil {
-		sidebar := lipgloss.NewStyle().
+		sidebarStyle := lipgloss.NewStyle().
 			Width(a.FolderWidth()).
-			Height(a.Height()).
-			Render(a.folderView.View())
+			Height(a.Height())
+		if a.folderFocused {
+			sidebarStyle = sidebarStyle.
+				BorderLeft(true).
+				BorderStyle(lipgloss.ThickBorder()).
+				BorderForeground(lipgloss.Color("#7D56F4")).
+				Width(a.FolderWidth() - 1)
+		}
+		sidebar := sidebarStyle.Render(a.folderView.View())
 
 		main := lipgloss.NewStyle().
 			Width(a.MainWidth()).
@@ -275,6 +287,8 @@ func (a *App) renderHelpLine() string {
 
 	if a.showHelp && a.helpView != nil {
 		bindings = append(bindings, a.helpView.ShortHelp()...)
+	} else if a.folderFocused && a.showFolder && a.folderView != nil {
+		bindings = append(bindings, a.folderView.ShortHelp()...)
 	} else if v := a.nav.Current(); v != nil {
 		bindings = append(bindings, v.ShortHelp()...)
 	}

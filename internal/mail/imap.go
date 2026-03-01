@@ -409,6 +409,51 @@ func (c *IMAPClient) SetSeen(uid uint32, seen bool) error {
 	return nil
 }
 
+// CreateFolder creates a new mailbox folder.
+func (c *IMAPClient) CreateFolder(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := c.ensureConnected(); err != nil {
+		return err
+	}
+
+	if err := c.client.Create(name, nil).Wait(); err != nil {
+		return fmt.Errorf("creating folder %q: %w", name, err)
+	}
+	return nil
+}
+
+// DeleteFolder deletes a mailbox folder.
+func (c *IMAPClient) DeleteFolder(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := c.ensureConnected(); err != nil {
+		return err
+	}
+
+	if err := c.client.Delete(name).Wait(); err != nil {
+		return fmt.Errorf("deleting folder %q: %w", name, err)
+	}
+	return nil
+}
+
+// RenameFolder renames a mailbox folder.
+func (c *IMAPClient) RenameFolder(oldName, newName string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := c.ensureConnected(); err != nil {
+		return err
+	}
+
+	if err := c.client.Rename(oldName, newName).Wait(); err != nil {
+		return fmt.Errorf("renaming folder %q to %q: %w", oldName, newName, err)
+	}
+	return nil
+}
+
 func containsFlag(flags []imap.Flag, target imap.Flag) bool {
 	for _, f := range flags {
 		if f == target {

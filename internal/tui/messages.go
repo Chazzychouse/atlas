@@ -94,6 +94,25 @@ type StatusMsg struct {
 type SpinnerStartMsg struct{}
 type SpinnerStopMsg struct{}
 
+// FolderCreatedMsg indicates a folder was created.
+type FolderCreatedMsg struct {
+	Name string
+	Err  error
+}
+
+// FolderDeletedMsg indicates a folder was deleted.
+type FolderDeletedMsg struct {
+	Name string
+	Err  error
+}
+
+// FolderRenamedMsg indicates a folder was renamed.
+type FolderRenamedMsg struct {
+	OldName string
+	NewName string
+	Err     error
+}
+
 // ErrMsg is a generic error message.
 type ErrMsg struct {
 	Err error
