@@ -121,6 +121,80 @@ func (c *IMAPClient) SelectFolder(name string) (uint32, error) {
 	return data.NumMessages, nil
 }
 
+// FetchRecentFromFolder selects folder, fetches the most recent limit envelopes,
+// then re-selects the previously active folder. Safe to call concurrently.
+func (c *IMAPClient) FetchRecentFromFolder(folder string, limit uint32) ([]Envelope, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := c.ensureConnected(); err != nil {
+		return nil, err
+	}
+
+	data, err := c.client.Select(folder, nil).Wait()
+	if err != nil {
+		return nil, fmt.Errorf("selecting folder %q: %w", folder, err)
+	}
+
+	total := data.NumMessages
+	if total == 0 {
+		return nil, nil
+	}
+
+	var start uint32 = 1
+	if total > limit {
+		start = total - limit + 1
+	}
+
+	var seqSet imap.SeqSet
+	seqSet.AddRange(start, 0)
+
+	fetchOptions := &imap.FetchOptions{
+		Envelope: true,
+		Flags:    true,
+		UID:      true,
+	}
+
+	fetchCmd := c.client.Fetch(seqSet, fetchOptions)
+	var envelopes []Envelope
+
+	for {
+		msg := fetchCmd.Next()
+		if msg == nil {
+			break
+		}
+		buf, err := msg.Collect()
+		if err != nil {
+			continue
+		}
+
+		env := Envelope{
+			UID:  uint32(buf.UID),
+			Seen: containsFlag(buf.Flags, imap.FlagSeen),
+		}
+		if buf.Envelope != nil {
+			env.Subject = buf.Envelope.Subject
+			env.Date = buf.Envelope.Date
+			if len(buf.Envelope.From) > 0 {
+				env.From = formatIMAPAddress(buf.Envelope.From[0])
+			}
+			for _, addr := range buf.Envelope.To {
+				env.To = append(env.To, formatIMAPAddress(addr))
+			}
+			for _, addr := range buf.Envelope.Cc {
+				env.Cc = append(env.Cc, formatIMAPAddress(addr))
+			}
+		}
+		envelopes = append(envelopes, env)
+	}
+
+	if err := fetchCmd.Close(); err != nil {
+		return nil, fmt.Errorf("fetching envelopes from %q: %w", folder, err)
+	}
+
+	return envelopes, nil
+}
+
 // FetchEnvelopes fetches envelope data for messages in the given sequence range.
 // start and end are 1-based sequence numbers. Use 0 for end to mean "*".
 func (c *IMAPClient) FetchEnvelopes(start, end uint32) ([]Envelope, error) {

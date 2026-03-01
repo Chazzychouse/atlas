@@ -18,6 +18,12 @@ A terminal email client built with Go and [Bubble Tea](https://github.com/charmb
 curl -fsSL https://raw.githubusercontent.com/chazzychouse/atlas/main/install.sh | sh
 ```
 
+### Quick install (Windows PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/chazzychouse/atlas/main/install.sh | iex
+```
+
 ### From source
 
 ```sh

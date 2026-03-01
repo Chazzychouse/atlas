@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/chazzychouse/atlas/internal/config"
+	"github.com/chazzychouse/atlas/internal/contacts"
 	"github.com/chazzychouse/atlas/internal/mail"
 	"github.com/chazzychouse/atlas/internal/tui/statusbar"
 	"github.com/charmbracelet/bubbles/key"
@@ -20,6 +21,7 @@ type App struct {
 	cfg           *config.Config
 	imap          *mail.IMAPClient
 	smtp          *mail.SMTPClient
+	contacts      *contacts.Manager
 	nav           *NavStack
 	statusbar     statusbar.Model
 	keys          GlobalKeyMap
@@ -36,11 +38,12 @@ type App struct {
 }
 
 // NewApp creates the root application model.
-func NewApp(cfg *config.Config, imap *mail.IMAPClient, smtp *mail.SMTPClient) *App {
+func NewApp(cfg *config.Config, imap *mail.IMAPClient, smtp *mail.SMTPClient, ctcts *contacts.Manager) *App {
 	return &App{
 		cfg:       cfg,
 		imap:      imap,
 		smtp:      smtp,
+		contacts:  ctcts,
 		nav:       NewNavStack(),
 		statusbar: statusbar.New(),
 		keys:      DefaultGlobalKeyMap(),
@@ -97,6 +100,57 @@ func (a *App) connectAndLoad() tea.Cmd {
 		}
 		return StatusMsg{Text: "Connected"}
 	}
+}
+
+// scanSentContacts fetches recent envelopes from the sent folder for contact extraction.
+func (a *App) scanSentContacts() tea.Cmd {
+	return func() tea.Msg {
+		// Try common sent-folder names in priority order.
+		folders, err := a.imap.ListFolders()
+		if err != nil {
+			return nil
+		}
+
+		sentFolder := findSentFolder(folders)
+		if sentFolder == "" {
+			return nil
+		}
+
+		envs, err := a.imap.FetchRecentFromFolder(sentFolder, 200)
+		if err != nil {
+			return nil
+		}
+		return ContactsSyncedMsg{Envelopes: envs}
+	}
+}
+
+// findSentFolder picks the best-matching sent folder from a folder list.
+func findSentFolder(folders []mail.Folder) string {
+	// Prefer exact Gmail name, then fall back to name-contains match.
+	priority := []string{
+		"[Gmail]/Sent Mail",
+		"Sent Mail",
+		"Sent Messages",
+		"Sent Items",
+		"Sent",
+	}
+	byName := make(map[string]bool, len(folders))
+	for _, f := range folders {
+		byName[f.Name] = true
+	}
+	for _, name := range priority {
+		if byName[name] {
+			return name
+		}
+	}
+	// Fallback: case-insensitive substring search.
+	for _, f := range folders {
+		lower := strings.ToLower(f.Name)
+		if strings.Contains(lower, "sent") {
+			return f.Name
+		}
+	}
+	return ""
 }
 
 // Update handles messages for the root app.
@@ -212,6 +266,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StatusMsg:
 		a.statusbar.SetStatus(msg.Text, msg.IsError)
+		// After the initial IMAP connection, kick off a background sent-folder scan.
+		if msg.Text == "Connected" && a.contacts != nil {
+			cmds = append(cmds, a.scanSentContacts())
+		}
 		a.statusGen++
 		if msg.Text != "" && !msg.IsError {
 			gen := a.statusGen
@@ -235,6 +293,37 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ErrMsg:
 		a.statusbar.SetStatus("Error: "+msg.Err.Error(), true)
 		a.statusbar.StopSpinner()
+
+	case ContactsSyncedMsg:
+		if a.contacts != nil {
+			for _, env := range msg.Envelopes {
+				a.contacts.Update(env.From, env.Date)
+				for _, addr := range env.To {
+					a.contacts.Update(addr, env.Date)
+				}
+				for _, addr := range env.Cc {
+					a.contacts.Update(addr, env.Date)
+				}
+			}
+		}
+
+	case EnvelopesLoadedMsg:
+		if msg.Err == nil && a.contacts != nil {
+			for _, env := range msg.Envelopes {
+				a.contacts.Update(env.From, env.Date)
+				for _, addr := range env.To {
+					a.contacts.Update(addr, env.Date)
+				}
+				for _, addr := range env.Cc {
+					a.contacts.Update(addr, env.Date)
+				}
+			}
+		}
+		if v := a.nav.Current(); v != nil {
+			updated, cmd := v.Update(msg)
+			a.nav.Replace(updated)
+			cmds = append(cmds, cmd)
+		}
 
 	default:
 		// Pass to current view

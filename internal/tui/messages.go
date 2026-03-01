@@ -120,3 +120,8 @@ type FolderRenamedMsg struct {
 type ErrMsg struct {
 	Err error
 }
+
+// ContactsSyncedMsg carries envelopes fetched purely for contact extraction.
+type ContactsSyncedMsg struct {
+	Envelopes []mail.Envelope
+}

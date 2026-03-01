@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/chazzychouse/atlas/internal/config"
+	"github.com/chazzychouse/atlas/internal/contacts"
 	"github.com/chazzychouse/atlas/internal/mail"
 	"github.com/chazzychouse/atlas/internal/tui"
 	"github.com/chazzychouse/atlas/internal/tui/composer"
@@ -46,7 +47,10 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	imapClient := mail.NewIMAPClient(cfg)
 	smtpClient := mail.NewSMTPClient(cfg)
 
-	app := tui.NewApp(cfg, imapClient, smtpClient)
+	contactsMgr := contacts.New(contacts.DefaultConfigDir())
+	_ = contactsMgr.Load()
+
+	app := tui.NewApp(cfg, imapClient, smtpClient, contactsMgr)
 
 	// Wire up the ViewFactory — this is the only place that imports all sub-packages.
 	app.SetFactory(func(id tui.ViewID, data tui.PushViewMsg) tui.View {
@@ -62,7 +66,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			return reader.New(imapClient, data.EnvelopeUID, app.MainWidth(), app.Height())
 
 		case tui.ViewComposer:
-			c := composer.New(cfg, smtpClient, app.MainWidth(), app.Height())
+			c := composer.New(cfg, smtpClient, contactsMgr, app.MainWidth(), app.Height())
 			if data.ReplyTo != nil {
 				c.Prefill(data.ReplyTo, data.ReplyAll, data.Forward)
 			}

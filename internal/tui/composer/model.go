@@ -3,8 +3,11 @@ package composer
 import (
 	"fmt"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/chazzychouse/atlas/internal/config"
+	"github.com/chazzychouse/atlas/internal/contacts"
 	"github.com/chazzychouse/atlas/internal/mail"
 	"github.com/chazzychouse/atlas/internal/tui"
 	"github.com/charmbracelet/bubbles/key"
@@ -22,21 +25,31 @@ const (
 	fieldCount
 )
 
+// suggWindowSize is how many suggestions to show at once.
+const suggWindowSize = 3
+
+// suggBoxWidth is the inner content width of the suggestion dropdown.
+const suggBoxWidth = 42
+
 // Model is the email composer view.
 type Model struct {
-	cfg      *config.Config
-	smtp     *mail.SMTPClient
-	inputs   []textinput.Model
-	body     textarea.Model
-	focus    int
-	width    int
-	height   int
-	keys     KeyMap
-	sending  bool
+	cfg         *config.Config
+	smtp        *mail.SMTPClient
+	contacts    *contacts.Manager
+	inputs      []textinput.Model
+	body        textarea.Model
+	focus       int
+	width       int
+	height      int
+	keys        KeyMap
+	sending     bool
+	suggestions []contacts.Contact
+	suggSel     int // absolute index into suggestions
+	showSugg    bool
 }
 
 // New creates a new composer view.
-func New(cfg *config.Config, smtp *mail.SMTPClient, width, height int) *Model {
+func New(cfg *config.Config, smtp *mail.SMTPClient, ctcts *contacts.Manager, width, height int) *Model {
 	inputs := make([]textinput.Model, 3) // To, Cc, Subject
 
 	for i := range inputs {
@@ -59,13 +72,14 @@ func New(cfg *config.Config, smtp *mail.SMTPClient, width, height int) *Model {
 	body.CharLimit = 0
 
 	return &Model{
-		cfg:    cfg,
-		smtp:   smtp,
-		inputs: inputs,
-		body:   body,
-		keys:   DefaultKeyMap(),
-		width:  width,
-		height: height,
+		cfg:      cfg,
+		smtp:     smtp,
+		contacts: ctcts,
+		inputs:   inputs,
+		body:     body,
+		keys:     DefaultKeyMap(),
+		width:    width,
+		height:   height,
 	}
 }
 
@@ -117,13 +131,34 @@ func (m *Model) Update(msg tea.Msg) (tui.View, tea.Cmd) {
 		if m.sending {
 			return m, nil
 		}
+
+		// When suggestions are visible on a To/Cc field, intercept navigation keys.
+		if m.showSugg && (m.focus == fieldTo || m.focus == fieldCc) {
+			switch msg.String() {
+			case "down":
+				m.suggSel = (m.suggSel + 1) % len(m.suggestions)
+				return m, nil
+			case "up":
+				m.suggSel = (m.suggSel - 1 + len(m.suggestions)) % len(m.suggestions)
+				return m, nil
+			case "tab", "enter":
+				m.acceptSuggestion()
+				return m, nil
+			case "esc":
+				m.showSugg = false
+				return m, nil
+			}
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Send):
 			return m, m.send()
 		case key.Matches(msg, m.keys.NextField):
+			m.showSugg = false
 			m.nextField()
 			return m, nil
 		case key.Matches(msg, m.keys.PrevField):
+			m.showSugg = false
 			m.prevField()
 			return m, nil
 		case key.Matches(msg, m.keys.Cancel):
@@ -147,7 +182,14 @@ func (m *Model) Update(msg tea.Msg) (tui.View, tea.Cmd) {
 		)
 	}
 
-	return m, m.updateInputs(msg)
+	cmd := m.updateInputs(msg)
+
+	// After processing input, refresh suggestions if a To/Cc field is active.
+	if m.focus == fieldTo || m.focus == fieldCc {
+		m.updateSuggestions()
+	}
+
+	return m, cmd
 }
 
 func (m *Model) View() string {
@@ -159,15 +201,23 @@ func (m *Model) View() string {
 	sb.WriteString(titleStyle.Render("  Compose"))
 	sb.WriteString("\n\n")
 
-	for _, input := range m.inputs {
+	// Render To, Cc, Subject individually so we can inject suggestion boxes.
+	for i, input := range m.inputs {
 		sb.WriteString("  " + input.View() + "\n")
+		if m.showSugg && (i == fieldTo || i == fieldCc) && m.focus == i {
+			sb.WriteString(m.renderSuggestions())
+		}
 	}
 
 	sb.WriteString("\n")
 	sb.WriteString(padStyle.Render(m.body.View()))
 
 	sb.WriteString("\n\n")
-	sb.WriteString(labelStyle.Render("  Ctrl+S: send | Tab: next field | Esc: cancel"))
+	if m.showSugg {
+		sb.WriteString(labelStyle.Render("  Ctrl+S: send │ ↑↓: cycle │ ↩/Tab: pick │ Esc: dismiss"))
+	} else {
+		sb.WriteString(labelStyle.Render("  Ctrl+S: send | Tab: next field | Esc: cancel"))
+	}
 
 	if m.sending {
 		sb.WriteString("\n\n  Sending...")
@@ -214,6 +264,14 @@ func (m *Model) send() tea.Cmd {
 		Cc:      cc,
 		Subject: m.inputs[fieldSubject].Value(),
 		Body:    m.body.Value(),
+	}
+
+	// Record sent addresses in contacts.
+	if m.contacts != nil {
+		now := time.Now()
+		for _, addr := range append(to, cc...) {
+			m.contacts.Update(addr, now)
+		}
 	}
 
 	return tea.Batch(
@@ -264,6 +322,144 @@ func (m *Model) updateInputs(msg tea.Msg) tea.Cmd {
 	}
 
 	return tea.Batch(cmds...)
+}
+
+// updateSuggestions recomputes the suggestion list from the active field's last token.
+func (m *Model) updateSuggestions() {
+	if m.contacts == nil {
+		return
+	}
+	token := lastToken(m.inputs[m.focus].Value())
+	results := m.contacts.Search(token)
+	if len(results) == 0 {
+		m.showSugg = false
+		m.suggestions = nil
+		return
+	}
+	// Keep selection stable when results are the same length, reset otherwise.
+	if len(results) != len(m.suggestions) {
+		m.suggSel = 0
+	}
+	m.suggestions = results
+	m.showSugg = true
+}
+
+// acceptSuggestion replaces the last token in the focused field with the selected contact.
+func (m *Model) acceptSuggestion() {
+	if !m.showSugg || len(m.suggestions) == 0 {
+		return
+	}
+	c := m.suggestions[m.suggSel]
+	current := m.inputs[m.focus].Value()
+
+	var prefix string
+	if idx := strings.LastIndex(current, ","); idx >= 0 {
+		prefix = strings.TrimRight(current[:idx+1], " ") + " "
+	}
+
+	m.inputs[m.focus].SetValue(prefix + c.Formatted() + ", ")
+	// Move cursor to end.
+	m.inputs[m.focus].CursorEnd()
+
+	m.showSugg = false
+	m.suggestions = nil
+}
+
+// suggestionWindowStart returns the scroll offset so suggSel is always visible.
+func (m *Model) suggestionWindowStart() int {
+	n := len(m.suggestions)
+	if n <= suggWindowSize {
+		return 0
+	}
+	start := m.suggSel - suggWindowSize + 1
+	if start < 0 {
+		start = 0
+	}
+	if start > n-suggWindowSize {
+		start = n - suggWindowSize
+	}
+	return start
+}
+
+// renderSuggestions builds the inline dropdown string.
+func (m *Model) renderSuggestions() string {
+	if len(m.suggestions) == 0 {
+		return ""
+	}
+
+	selectedStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#7D56F4")).
+		Foreground(lipgloss.Color("#FFFFFF"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	moreStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4"))
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7D56F4")).
+		Padding(0, 1)
+
+	start := m.suggestionWindowStart()
+	end := start + suggWindowSize
+	if end > len(m.suggestions) {
+		end = len(m.suggestions)
+	}
+
+	innerWidth := suggBoxWidth
+
+	var lines []string
+
+	// "▲ N above" indicator
+	if start > 0 {
+		label := fmt.Sprintf("▲ %d above", start)
+		lines = append(lines, moreStyle.Render(padOrTrunc(label, innerWidth)))
+	}
+
+	for i := start; i < end; i++ {
+		c := m.suggestions[i]
+		text := c.Formatted()
+		text = padOrTrunc(text, innerWidth)
+		if i == m.suggSel {
+			lines = append(lines, selectedStyle.Render(text))
+		} else {
+			lines = append(lines, dimStyle.Render(text))
+		}
+	}
+
+	// "▼ N more" indicator
+	remaining := len(m.suggestions) - end
+	if remaining > 0 {
+		label := fmt.Sprintf("▼ %d more", remaining)
+		lines = append(lines, moreStyle.Render(padOrTrunc(label, innerWidth)))
+	}
+
+	box := boxStyle.Render(strings.Join(lines, "\n"))
+
+	// Indent to align with the text input area (2 prefix + 9 prompt = 11 chars).
+	indent := strings.Repeat(" ", 11)
+	var out strings.Builder
+	for _, line := range strings.Split(box, "\n") {
+		out.WriteString(indent + line + "\n")
+	}
+	return out.String()
+}
+
+// padOrTrunc pads or truncates s to exactly width visible runes.
+func padOrTrunc(s string, width int) string {
+	n := utf8.RuneCountInString(s)
+	if n > width {
+		runes := []rune(s)
+		return string(runes[:width-1]) + "…"
+	}
+	return s + strings.Repeat(" ", width-n)
+}
+
+// lastToken returns the text after the last comma in s (trimmed).
+// Returns "" if s ends with a comma (user just accepted an address).
+func lastToken(s string) string {
+	idx := strings.LastIndex(s, ",")
+	if idx < 0 {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(s[idx+1:])
 }
 
 func parseAddresses(s string) []string {
