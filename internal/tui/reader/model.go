@@ -97,9 +97,12 @@ func (m *Model) Update(msg tea.Msg) (tui.View, tea.Cmd) {
 	case tui.MessageLoadedMsg:
 		m.loading = false
 		if msg.Err != nil {
-			return m, func() tea.Msg {
-				return tui.StatusMsg{Text: "Error: " + msg.Err.Error(), IsError: true}
-			}
+			return m, tea.Batch(
+				func() tea.Msg { return tui.SpinnerStopMsg{} },
+				func() tea.Msg {
+					return tui.StatusMsg{Text: "Error: " + msg.Err.Error(), IsError: true}
+				},
+			)
 		}
 		m.message = msg.Message
 		m.setupViewport()
