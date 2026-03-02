@@ -262,12 +262,17 @@ func (c *IMAPClient) FetchEnvelopes(start, end uint32) ([]Envelope, error) {
 }
 
 // FetchMessage fetches the full message (envelope + body) by UID.
-func (c *IMAPClient) FetchMessage(uid uint32) (*Message, error) {
+// It selects the given folder first to ensure the UID is valid.
+func (c *IMAPClient) FetchMessage(folder string, uid uint32) (*Message, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if err := c.ensureConnected(); err != nil {
 		return nil, err
+	}
+
+	if _, err := c.client.Select(folder, nil).Wait(); err != nil {
+		return nil, fmt.Errorf("selecting folder %q: %w", folder, err)
 	}
 
 	var uidSet imap.UIDSet

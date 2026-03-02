@@ -18,6 +18,7 @@ type Model struct {
 	imap     *mail.IMAPClient
 	viewport viewport.Model
 	message  *mail.Message
+	folder   string
 	uid      uint32
 	width    int
 	height   int
@@ -27,9 +28,10 @@ type Model struct {
 }
 
 // New creates a new reader view.
-func New(imap *mail.IMAPClient, uid uint32, width, height int) *Model {
+func New(imap *mail.IMAPClient, folder string, uid uint32, width, height int) *Model {
 	return &Model{
 		imap:   imap,
+		folder: folder,
 		uid:    uid,
 		width:  width,
 		height: height,
@@ -40,7 +42,7 @@ func New(imap *mail.IMAPClient, uid uint32, width, height int) *Model {
 func (m *Model) Init() tea.Cmd {
 	m.loading = true
 	return tea.Batch(
-		fetchMessage(m.imap, m.uid),
+		fetchMessage(m.imap, m.folder, m.uid),
 		func() tea.Msg { return tui.SpinnerStartMsg{} },
 		func() tea.Msg { return tui.StatusMsg{Text: "Loading message..."} },
 	)
@@ -97,9 +99,12 @@ func (m *Model) Update(msg tea.Msg) (tui.View, tea.Cmd) {
 	case tui.MessageLoadedMsg:
 		m.loading = false
 		if msg.Err != nil {
-			return m, func() tea.Msg {
-				return tui.StatusMsg{Text: "Error: " + msg.Err.Error(), IsError: true}
-			}
+			return m, tea.Batch(
+				func() tea.Msg { return tui.SpinnerStopMsg{} },
+				func() tea.Msg {
+					return tui.StatusMsg{Text: "Error: " + msg.Err.Error(), IsError: true}
+				},
+			)
 		}
 		m.message = msg.Message
 		m.setupViewport()

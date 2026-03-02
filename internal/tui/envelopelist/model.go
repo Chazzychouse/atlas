@@ -121,6 +121,7 @@ func (m *Model) Update(msg tea.Msg) (tui.View, tea.Cmd) {
 					return tui.PushViewMsg{
 						ViewID:      tui.ViewReader,
 						EnvelopeUID: env.UID,
+						Folder:      m.folder,
 					}
 				}
 			}
@@ -151,6 +152,7 @@ func (m *Model) Update(msg tea.Msg) (tui.View, tea.Cmd) {
 					return tui.PushViewMsg{
 						ViewID:      tui.ViewReader,
 						EnvelopeUID: env.UID,
+						Folder:      m.folder,
 					}
 				}
 			}

@@ -63,7 +63,11 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			return envelopelist.New(imapClient, folder, app.MainWidth(), app.Height())
 
 		case tui.ViewReader:
-			return reader.New(imapClient, data.EnvelopeUID, app.MainWidth(), app.Height())
+			folder := data.Folder
+			if folder == "" {
+				folder = "INBOX"
+			}
+			return reader.New(imapClient, folder, data.EnvelopeUID, app.MainWidth(), app.Height())
 
 		case tui.ViewComposer:
 			c := composer.New(cfg, smtpClient, contactsMgr, app.MainWidth(), app.Height())

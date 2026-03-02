@@ -6,9 +6,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func fetchMessage(imap *mail.IMAPClient, uid uint32) tea.Cmd {
+func fetchMessage(imap *mail.IMAPClient, folder string, uid uint32) tea.Cmd {
 	return func() tea.Msg {
-		msg, err := imap.FetchMessage(uid)
+		msg, err := imap.FetchMessage(folder, uid)
 		return tui.MessageLoadedMsg{Message: msg, Err: err}
 	}
 }
